@@ -49,7 +49,7 @@ body {
 }
 
 .hero {
-  background: url('img/Revelando_O_Segredo_na_Ilha.webp') center/cover no-repeat;
+  background: url('Revelando_O_Segredo_na_Ilha.webp') center/cover no-repeat;
   height: 80vh;
   position: relative;
   display: flex;
