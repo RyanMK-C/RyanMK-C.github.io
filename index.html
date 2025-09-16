@@ -11,48 +11,45 @@
       height: 100%;
       width: 100%;
       font-family: Arial, sans-serif;
-      background-color: hsl(210, 50%, 50%);
+      background-color: #282828;
       overflow: hidden;
       user-select: none;
     }
+
     #video {
-      position: fixed;
-      width: 320px;
-      height: 240px;
-      bottom: 15px;
-      right: 15px;
+      position: absolute;
+      width: 100%;
+      height: 100%;
       object-fit: cover;
-      border-radius: 12px;
-      border: 2px solid lime;
+      z-index: 1;
       transform: scaleX(-1); /* Espelha a imagem da câmera */
-      z-index: 10;
     }
+
     #feedbackCanvas {
-      position: fixed;
+      position: absolute;
       top: 0;
       left: 0;
-      width: 100vw;
-      height: 100vh;
+      width: 100%;
+      height: 100%;
+      z-index: 2;
       pointer-events: none;
-      z-index: 5;
     }
+
     #tutorial {
-      position: fixed;
-      top: 15px;
-      right: 15px;
-      background: rgba(0, 0, 0, 0.7);
+      position: absolute;
+      top: 10%;
+      right: 20px;
+      background-color: rgba(0, 0, 0, 0.7);
       color: white;
       padding: 15px;
-      border-radius: 12px;
-      z-index: 20;
+      border-radius: 8px;
       width: 250px;
       font-size: 14px;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
+      z-index: 10;
     }
+
     #status {
-      position: fixed;
+      position: absolute;
       bottom: 10px;
       left: 10px;
       color: white;
@@ -60,7 +57,7 @@
       padding: 6px 10px;
       border-radius: 8px;
       font-size: 14px;
-      z-index: 20;
+      z-index: 10;
     }
   </style>
 </head>
@@ -71,8 +68,7 @@
   <div id="tutorial">
     <h3>Instruções:</h3>
     <p><strong>Pinça</strong>: Aperte os dedos indicador e polegar para aumentar o brilho.</p>
-    <p><strong>Deslizar</strong>: Use o movimento para alterar o brilho da tela.</p>
-    <p><strong>Segurar</strong>: Mantenha a mão aberta para interações adicionais.</p>
+    <p><strong>Deslizar</strong>: Movimente a mão para alterar o brilho da tela.</p>
   </div>
 
   <div id="status">Carregando câmera...</div>
@@ -84,50 +80,44 @@
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/handpose"></script>
 
   <script>
-    (async () => {
-      const status = document.getElementById('status');
+    async function setupCamera() {
       const video = document.getElementById('video');
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user' },
+        audio: false,
+      });
+      video.srcObject = stream;
+
+      return new Promise(resolve => {
+        video.onloadedmetadata = () => {
+          video.play();
+          resolve(video);
+        };
+      });
+    }
+
+    async function detectHands(video, model) {
       const canvas = document.getElementById('feedbackCanvas');
       const ctx = canvas.getContext('2d');
-      const tutorial = document.getElementById('tutorial');
+      const status = document.getElementById('status');
+
+      const videoWidth = video.videoWidth || 640;
+      const videoHeight = video.videoHeight || 480;
 
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
 
-      // Configuração da câmera
-      async function setupCamera() {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'user' },
-          audio: false,
-        });
-        video.srcObject = stream;
-        return new Promise(resolve => {
-          video.onloadedmetadata = () => {
-            video.play();
-            resolve();
-          };
-        });
-      }
-
-      // Carregar modelo de handpose
-      status.textContent = 'Carregando câmera...';
-      await setupCamera();
-      status.textContent = 'Carregando modelo...';
-      await tf.setBackend('webgl');
-      const model = await handpose.load();
-      status.textContent = 'Modelo carregado. Buscando mão...';
-
-      let currentBrightness = 1;  // Brilho inicial
-      document.body.style.filter = `brightness(${currentBrightness})`;
-
+      // Função para limpar o canvas
       function clearCanvas() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
       }
 
+      // Função para desenhar os pontos da mão
       function drawLandmarks(landmarks) {
         clearCanvas();
         ctx.fillStyle = 'lime';
 
+        // Ajuste de escala para o canvas
         const videoWidth = video.videoWidth || 640;
         const videoHeight = video.videoHeight || 480;
 
@@ -145,15 +135,19 @@
         }
       }
 
-      // Detectar a distância entre os dedos para o gesto de pinça
+      // Função para calcular distância entre dois pontos
       function distance(p1, p2) {
         return Math.hypot(p1[0] - p2[0], p1[1] - p2[1]);
       }
 
-      let isPinching = false;
+      let currentBrightness = 1;  // Brilho inicial
+      document.body.style.filter = `brightness(${currentBrightness})`;
 
-      // Detectar mãos e movimentos
-      async function detectHands() {
+      // Detectar gestos de pinça
+      let isPinching = false;
+      const PINCH_THRESHOLD = 30;
+
+      async function loop() {
         const predictions = await model.estimateHands(video, true);
 
         if (predictions.length > 0) {
@@ -163,17 +157,16 @@
           // Desenhar os pontos da mão
           drawLandmarks(landmarks);
 
-          // Detectar gesto de pinça (distância entre os dedos indicador e polegar)
-          const dist = distance(landmarks[8], landmarks[4]);
-          const PINCH_THRESHOLD = 40;  // Distância mínima para ser considerado pinça
+          // Detectar gesto de pinça (distância entre polegar e indicador)
+          const pinchDistance = distance(landmarks[8], landmarks[4]);
 
-          if (dist < PINCH_THRESHOLD && !isPinching) {
+          if (pinchDistance < PINCH_THRESHOLD && !isPinching) {
             isPinching = true;
-            // Aumentar o brilho quando o gesto de pinça é detectado
-            currentBrightness = Math.min(2, currentBrightness + 0.1); // Limita o brilho até 2
+            // Aumentar brilho
+            currentBrightness = Math.min(2, currentBrightness + 0.1);  // Limita até o máximo de 2x brilho
             document.body.style.filter = `brightness(${currentBrightness})`;
-            status.textContent = `Brilho aumentado: ${currentBrightness.toFixed(2)}`;
-          } else if (dist >= PINCH_THRESHOLD && isPinching) {
+            status.textContent = `Brilho: ${currentBrightness.toFixed(2)}`;
+          } else if (pinchDistance >= PINCH_THRESHOLD && isPinching) {
             isPinching = false;
           }
 
@@ -182,11 +175,30 @@
           status.textContent = 'Nenhuma mão detectada';
         }
 
-        requestAnimationFrame(detectHands);
+        requestAnimationFrame(loop);
       }
 
-      detectHands();
-    })();
+      loop();
+    }
+
+    async function init() {
+      const status = document.getElementById('status');
+      status.textContent = 'Carregando modelo...';
+
+      // Carregar o modelo Handpose
+      await tf.setBackend('webgl');
+      const model = await handpose.load();
+
+      status.textContent = 'Modelo carregado. Detectando mãos...';
+
+      // Configuração da câmera
+      const video = await setupCamera();
+
+      // Iniciar a detecção de mãos
+      detectHands(video, model);
+    }
+
+    init();
   </script>
 </body>
 </html>
