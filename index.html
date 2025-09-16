@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Controle Gestual e Eye Tracking</title>
+  <title>Controle Gestual com Hand Tracking</title>
   <style>
     html, body {
       margin: 0;
@@ -12,6 +12,7 @@
       width: 100%;
       font-family: Arial, sans-serif;
       background-color: hsl(210, 50%, 50%);
+      overflow: hidden;
       user-select: none;
     }
     #video {
@@ -23,22 +24,8 @@
       object-fit: cover;
       border-radius: 12px;
       border: 2px solid lime;
-      transform: scaleX(-1);
+      transform: scaleX(-1); /* Espelha a imagem da câmera */
       z-index: 10;
-    }
-    #hud {
-      position: fixed;
-      top: 15px;
-      left: 15px;
-      background: rgba(0,0,0,0.5);
-      padding: 15px 20px;
-      border-radius: 12px;
-      color: white;
-      z-index: 20;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-      width: 220px;
     }
     #feedbackCanvas {
       position: fixed;
@@ -49,12 +36,27 @@
       pointer-events: none;
       z-index: 5;
     }
+    #tutorial {
+      position: fixed;
+      top: 15px;
+      right: 15px;
+      background: rgba(0, 0, 0, 0.7);
+      color: white;
+      padding: 15px;
+      border-radius: 12px;
+      z-index: 20;
+      width: 250px;
+      font-size: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
     #status {
       position: fixed;
       bottom: 10px;
       left: 10px;
       color: white;
-      background: rgba(0,0,0,0.6);
+      background: rgba(0, 0, 0, 0.6);
       padding: 6px 10px;
       border-radius: 8px;
       font-size: 14px;
@@ -66,9 +68,11 @@
   <video id="video" autoplay playsinline></video>
   <canvas id="feedbackCanvas"></canvas>
 
-  <div id="hud">
-    <label for="brightnessRange">Brilho:</label>
-    <input type="range" id="brightnessRange" min="0.2" max="2" step="0.01" value="1" />
+  <div id="tutorial">
+    <h3>Instruções:</h3>
+    <p><strong>Pinça</strong>: Aperte os dedos indicador e polegar para aumentar o brilho.</p>
+    <p><strong>Deslizar</strong>: Use o movimento para alterar o brilho da tela.</p>
+    <p><strong>Segurar</strong>: Mantenha a mão aberta para interações adicionais.</p>
   </div>
 
   <div id="status">Carregando câmera...</div>
@@ -79,21 +83,18 @@
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/handpose"></script>
 
-  <!-- WebGazer.js para eye tracking -->
-  <script src="https://cdn.jsdelivr.net/npm/webgazer/dist/webgazer.min.js"></script>
-
   <script>
     (async () => {
       const status = document.getElementById('status');
-      const brightnessRange = document.getElementById('brightnessRange');
       const video = document.getElementById('video');
       const canvas = document.getElementById('feedbackCanvas');
       const ctx = canvas.getContext('2d');
+      const tutorial = document.getElementById('tutorial');
 
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
 
-      // Setup camera
+      // Configuração da câmera
       async function setupCamera() {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: 'user' },
@@ -108,7 +109,7 @@
         });
       }
 
-      // Load handpose model
+      // Carregar modelo de handpose
       status.textContent = 'Carregando câmera...';
       await setupCamera();
       status.textContent = 'Carregando modelo...';
@@ -116,45 +117,75 @@
       const model = await handpose.load();
       status.textContent = 'Modelo carregado. Buscando mão...';
 
-      // WebGazer para eye tracking
-      webgazer.setRegression('ridge')  // ridge ou polynomial
-        .setGazeListener(function(data, elapsedTime) {
-          if (data) {
-            const x = data.x;
-            const y = data.y;
-            drawEyeTrackingPoint(x, y);
-          }
-        });
+      let currentBrightness = 1;  // Brilho inicial
+      document.body.style.filter = `brightness(${currentBrightness})`;
 
-      // Iniciar o WebGazer
-      webgazer.begin();
-      webgazer.showPredictionPoints(true); // Mostrar pontos de previsão no canvas
-
-      // Função para desenhar o ponto de visão (tracking dos olhos)
-      function drawEyeTrackingPoint(x, y) {
-        ctx.clearRect(0, 0, canvas.width, canvas.height); // Limpa a tela
-        ctx.fillStyle = 'red';
-        ctx.beginPath();
-        ctx.arc(x, y, 10, 0, 2 * Math.PI);
-        ctx.fill();
+      function clearCanvas() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
       }
 
-      // Atualiza status
-      webgazer.setGazeListener(function(data) {
-        if (data) {
-          status.textContent = `Gaze X: ${data.x.toFixed(2)} Y: ${data.y.toFixed(2)}`;
-        } else {
-          status.textContent = 'Aguardando rastreamento...';
-        }
-      });
+      function drawLandmarks(landmarks) {
+        clearCanvas();
+        ctx.fillStyle = 'lime';
 
-      // Atualizar brilho com slider
-      document.body.style.filter = `brightness(${brightnessRange.value})`;
-      brightnessRange.addEventListener('input', () => {
-        document.body.style.filter = `brightness(${brightnessRange.value})`;
-      });
-      
-      // Aqui pode adicionar mais interações como troca de cor, etc.
+        const videoWidth = video.videoWidth || 640;
+        const videoHeight = video.videoHeight || 480;
+
+        for (const point of landmarks) {
+          let x = videoWidth - point[0];  // Espelhar X para combinar com o vídeo espelhado
+          let y = point[1];
+
+          // Escalar para o tamanho do canvas
+          x = (x / videoWidth) * canvas.width;
+          y = (y / videoHeight) * canvas.height;
+
+          ctx.beginPath();
+          ctx.arc(x, y, 10, 0, 2 * Math.PI);
+          ctx.fill();
+        }
+      }
+
+      // Detectar a distância entre os dedos para o gesto de pinça
+      function distance(p1, p2) {
+        return Math.hypot(p1[0] - p2[0], p1[1] - p2[1]);
+      }
+
+      let isPinching = false;
+
+      // Detectar mãos e movimentos
+      async function detectHands() {
+        const predictions = await model.estimateHands(video, true);
+
+        if (predictions.length > 0) {
+          const hand = predictions[0];
+          const landmarks = hand.landmarks;
+
+          // Desenhar os pontos da mão
+          drawLandmarks(landmarks);
+
+          // Detectar gesto de pinça (distância entre os dedos indicador e polegar)
+          const dist = distance(landmarks[8], landmarks[4]);
+          const PINCH_THRESHOLD = 40;  // Distância mínima para ser considerado pinça
+
+          if (dist < PINCH_THRESHOLD && !isPinching) {
+            isPinching = true;
+            // Aumentar o brilho quando o gesto de pinça é detectado
+            currentBrightness = Math.min(2, currentBrightness + 0.1); // Limita o brilho até 2
+            document.body.style.filter = `brightness(${currentBrightness})`;
+            status.textContent = `Brilho aumentado: ${currentBrightness.toFixed(2)}`;
+          } else if (dist >= PINCH_THRESHOLD && isPinching) {
+            isPinching = false;
+          }
+
+        } else {
+          clearCanvas();
+          status.textContent = 'Nenhuma mão detectada';
+        }
+
+        requestAnimationFrame(detectHands);
+      }
+
+      detectHands();
     })();
   </script>
 </body>
